@@ -10,6 +10,7 @@
 //!   the window (for autostart). M5 wires this into the autostart toggle.
 
 mod app;
+mod color;
 mod config;
 mod i18n;
 mod overlay;
