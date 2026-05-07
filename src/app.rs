@@ -23,7 +23,6 @@ pub struct Flags {
 
 pub struct AppModel {
     core: Core,
-    #[allow(dead_code)]
     config: Config,
     #[allow(dead_code)]
     flags: Flags,
@@ -31,8 +30,8 @@ pub struct AppModel {
     picked: Option<PickedColor>,
     /// True while the overlay is running, used to debounce repeated clicks.
     picking: bool,
-    /// Recent picks, newest first. Capped at HISTORY_LIMIT. M3 makes this
-    /// persistent via cosmic-config; right now it lives in-memory only.
+    /// Recent picks, newest first. Capped at HISTORY_LIMIT. Mirrored to
+    /// `config.history` (which is persisted by cosmic-config).
     history: Vec<PickedColor>,
 }
 
@@ -70,13 +69,19 @@ impl cosmic::Application for AppModel {
             })
             .unwrap_or_default();
 
+        let history = parse_history(&config.history);
+        // Picked starts as the most recent entry (if any) so the result view
+        // is populated immediately on relaunch — feels nicer than a blank
+        // welcome state when there's history to show.
+        let picked = history.first().copied();
+
         let app = AppModel {
             core,
             config,
             flags,
-            picked: None,
+            picked,
             picking: false,
-            history: Vec::new(),
+            history,
         };
         (app, Task::none())
     }
@@ -153,6 +158,7 @@ impl cosmic::Application for AppModel {
                     self.picked = Some(picked);
                     self.history.insert(0, picked);
                     self.history.truncate(HISTORY_LIMIT);
+                    self.save_history();
                 }
             }
             Message::Copy(text) => {
@@ -165,9 +171,13 @@ impl cosmic::Application for AppModel {
             }
             Message::ClearHistory => {
                 self.history.clear();
+                self.save_history();
             }
             Message::UpdateConfig(c) => {
                 self.config = c;
+                // Re-parse so the in-memory list matches whatever just landed
+                // on disk (e.g. someone editing the config file directly).
+                self.history = parse_history(&self.config.history);
             }
         }
         Task::none()
@@ -175,6 +185,17 @@ impl cosmic::Application for AppModel {
 }
 
 impl AppModel {
+    /// Persist the current history list to cosmic-config. Failure is silent —
+    /// we'd rather lose a pick than crash the app.
+    fn save_history(&mut self) {
+        let app_id = <Self as cosmic::Application>::APP_ID;
+        if let Ok(ctx) = cosmic_config::Config::new(app_id, Config::VERSION) {
+            self.config.history =
+                self.history.iter().map(PickedColor::hex).collect();
+            let _ = self.config.write_entry(&ctx);
+        }
+    }
+
     fn welcome_view(&self) -> Element<'_, Message> {
         widget::container(
             widget::Column::new()
@@ -299,6 +320,13 @@ impl AppModel {
             ))
             .into()
     }
+}
+
+/// Decode a list of `#RRGGBB` strings into PickedColors, dropping anything
+/// malformed. Used both at startup (loading from disk) and on UpdateConfig
+/// (when an external edit triggers a refresh).
+fn parse_history(hex_list: &[String]) -> Vec<PickedColor> {
+    hex_list.iter().filter_map(|s| PickedColor::from_hex(s)).collect()
 }
 
 /// A settings-list row: label on the left, monospace value, copy icon button.

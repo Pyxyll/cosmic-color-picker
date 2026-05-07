@@ -1,13 +1,12 @@
 //! Persistent configuration stored via cosmic-config.
-//!
-//! M0: skeleton only. Fields land progressively across milestones — history
-//! list (M3), autostart toggle (M5), preferred hotkey (M6), default format.
 
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 
 #[derive(Debug, Default, Clone, CosmicConfigEntry, Eq, PartialEq)]
 #[version = 1]
 pub struct Config {
-    /// Reserved. Will be populated in later milestones.
-    placeholder: String,
+    /// Recent picks as hex strings (`#RRGGBB`), newest first. Capped at the
+    /// limit defined in `app.rs`. Stored as strings rather than packed ints
+    /// so the on-disk config file stays human-readable and editable.
+    pub history: Vec<String>,
 }
