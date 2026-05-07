@@ -8,9 +8,12 @@
 use crate::color::PickedColor;
 use crate::config::Config;
 use crate::fl;
+use crate::ipc;
 use crate::overlay;
 use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
+use cosmic::iced::futures::channel::mpsc;
+use cosmic::iced::futures::SinkExt;
 use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget;
@@ -128,9 +131,37 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        self.core()
-            .watch_config::<Config>(Self::APP_ID)
-            .map(|update| Message::UpdateConfig(update.config))
+        Subscription::batch([
+            self.core()
+                .watch_config::<Config>(Self::APP_ID)
+                .map(|update| Message::UpdateConfig(update.config)),
+            // Listen for pick requests from `cosmic-color-picker --pick`
+            // (i.e. the user's hotkey). Each accepted connection translates
+            // into a single PickPressed message handled by the normal
+            // overlay path, so the result lands in this app's history.
+            Subscription::run(|| {
+                cosmic::iced::stream::channel::<Message>(
+                    8,
+                    |mut tx: mpsc::Sender<Message>| async move {
+                        ipc::clean_stale_socket();
+                        let Ok(listener) =
+                            tokio::net::UnixListener::bind(ipc::socket_path())
+                        else {
+                            return;
+                        };
+                        loop {
+                            let Ok((mut stream, _)) = listener.accept().await else {
+                                continue;
+                            };
+                            use tokio::io::AsyncReadExt;
+                            let mut buf = [0u8; 1];
+                            let _ = stream.read(&mut buf).await;
+                            let _ = tx.send(Message::PickPressed).await;
+                        }
+                    },
+                )
+            }),
+        ])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {

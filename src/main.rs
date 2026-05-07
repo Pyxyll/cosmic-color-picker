@@ -13,6 +13,7 @@ mod app;
 mod color;
 mod config;
 mod i18n;
+mod ipc;
 mod overlay;
 
 use std::env;
@@ -69,10 +70,22 @@ fn main() -> ExitCode {
     run_app(flags.background)
 }
 
-/// `--pick` path: capture + overlay, copy hex to clipboard, fire notification.
-/// Once M4 lands, this will instead D-Bus into the running app and the daemon
-/// owns the post-pick UI.
+/// `--pick` path. If the app is already running, hand off via the IPC
+/// socket so the result lands in the running history. Otherwise fall back
+/// to the standalone overlay flow (capture + copy + notify) so the hotkey
+/// keeps working when no daemon is up.
 fn run_pick() -> ExitCode {
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(_) => return run_pick_standalone(),
+    };
+    if runtime.block_on(ipc::try_send_pick()) {
+        return ExitCode::SUCCESS;
+    }
+    run_pick_standalone()
+}
+
+fn run_pick_standalone() -> ExitCode {
     match overlay::pick_color() {
         Ok(Some(hex)) => {
             deliver(&hex);
