@@ -9,3 +9,6 @@ format-hsl = HSL
 format-oklch = OKLCH
 history-title = Recent
 history-clear = Clear
+settings-startup = Startup
+settings-autostart = Start on login
+settings-autostart-hint = When enabled, the picker runs hidden in the background so your hotkey works immediately. Use the minimize button to send the window away without exiting; closing via the X button exits the daemon.

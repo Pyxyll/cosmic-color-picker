@@ -5,6 +5,7 @@
 //! card. Uses libcosmic theme tokens (Card container, settings::item) so
 //! the visual treatment matches Cosmic Settings and other native apps.
 
+use crate::autostart;
 use crate::color::PickedColor;
 use crate::config::Config;
 use crate::fl;
@@ -14,6 +15,7 @@ use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::futures::channel::mpsc;
 use cosmic::iced::futures::SinkExt;
+use cosmic::iced::window;
 use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget;
@@ -27,7 +29,6 @@ pub struct Flags {
 pub struct AppModel {
     core: Core,
     config: Config,
-    #[allow(dead_code)]
     flags: Flags,
     /// Most recently picked color, displayed in the result view.
     picked: Option<PickedColor>,
@@ -36,6 +37,17 @@ pub struct AppModel {
     /// Recent picks, newest first. Capped at HISTORY_LIMIT. Mirrored to
     /// `config.history` (which is persisted by cosmic-config).
     history: Vec<PickedColor>,
+    /// Which page is showing in the main view.
+    page: Page,
+    /// Cached result of `autostart::is_enabled()`, refreshed on entering the
+    /// settings page so the toggle reflects the on-disk truth.
+    autostart_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Home,
+    Settings,
 }
 
 const HISTORY_LIMIT: usize = 16;
@@ -48,6 +60,14 @@ pub enum Message {
     SelectHistory(usize),
     ClearHistory,
     UpdateConfig(Config),
+    OpenSettings,
+    CloseSettings,
+    ToggleAutostart(bool),
+    /// IPC asked us to show the window (i.e. user re-launched while daemon
+    /// was running, or hit a "Show" hotkey).
+    ShowWindow,
+    /// Window close clicked: hide instead of exit so the daemon survives.
+    HideWindow,
 }
 
 impl cosmic::Application for AppModel {
@@ -78,6 +98,7 @@ impl cosmic::Application for AppModel {
         // welcome state when there's history to show.
         let picked = history.first().copied();
 
+        let want_hidden = flags.background;
         let app = AppModel {
             core,
             config,
@@ -85,12 +106,55 @@ impl cosmic::Application for AppModel {
             picked,
             picking: false,
             history,
+            page: Page::Home,
+            autostart_enabled: autostart::is_enabled(),
         };
-        (app, Task::none())
+
+        // Background mode: dispatch a HideWindow as the very first message so
+        // the window starts visible for an instant, then minimises away. iced
+        // doesn't expose "create hidden" cleanly, so this is the pragmatic
+        // path. Visible blip is single-frame; users won't notice on fast HW.
+        let task = if want_hidden {
+            Task::done(cosmic::Action::App(Message::HideWindow))
+        } else {
+            Task::none()
+        };
+        (app, task)
     }
+
+    // NOTE on closing: libcosmic forcibly calls iced::exit() when the main
+    // window is closed (via core.exit_on_main_window_closed, no public
+    // setter as of this writing). We can't intercept and convert "close" to
+    // "hide" — the user clicking X always kills the daemon. Instead, we
+    // expose an explicit "Hide" button in the header that calls set_mode
+    // without triggering the close path. --background mode never shows the
+    // window at all, so the daemon lives until manually killed.
 
     fn header_start(&self) -> Vec<Element<'_, Message>> {
         vec![widget::text::heading(fl!("app-title")).into()]
+    }
+
+    fn header_end(&self) -> Vec<Element<'_, Message>> {
+        let nav_icon = match self.page {
+            Page::Home => "emblem-system-symbolic",
+            Page::Settings => "go-previous-symbolic",
+        };
+        let nav_msg = match self.page {
+            Page::Home => Message::OpenSettings,
+            Page::Settings => Message::CloseSettings,
+        };
+
+        let hide = widget::button::icon(
+            widget::icon::from_name("window-minimize-symbolic"),
+        )
+        .on_press(Message::HideWindow);
+
+        let nav = widget::button::icon(widget::icon::from_name(nav_icon))
+            .on_press(nav_msg);
+
+        // Hide first so the typical action (send window away) sits closer to
+        // the user's pointer-of-attention than the settings gear.
+        vec![hide.into(), nav.into()]
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -100,11 +164,16 @@ impl cosmic::Application for AppModel {
             fl!("pick-button")
         };
         let pick_button = widget::button::suggested(pick_label)
-            .on_press_maybe((!self.picking).then_some(Message::PickPressed));
+            .on_press_maybe(
+                (self.page == Page::Home && !self.picking).then_some(Message::PickPressed),
+            );
 
-        let body = match &self.picked {
-            None => self.welcome_view(),
-            Some(p) => self.result_view(p),
+        let body = match self.page {
+            Page::Settings => self.settings_view(),
+            Page::Home => match &self.picked {
+                None => self.welcome_view(),
+                Some(p) => self.result_view(p),
+            },
         };
 
         // Pick button stays pinned at the top; the rest scrolls so the
@@ -156,7 +225,11 @@ impl cosmic::Application for AppModel {
                             use tokio::io::AsyncReadExt;
                             let mut buf = [0u8; 1];
                             let _ = stream.read(&mut buf).await;
-                            let _ = tx.send(Message::PickPressed).await;
+                            let msg = match buf[0] {
+                                b's' => Message::ShowWindow,
+                                _ => Message::PickPressed,
+                            };
+                            let _ = tx.send(msg).await;
                         }
                     },
                 )
@@ -210,6 +283,34 @@ impl cosmic::Application for AppModel {
                 // on disk (e.g. someone editing the config file directly).
                 self.history = parse_history(&self.config.history);
             }
+            Message::OpenSettings => {
+                self.autostart_enabled = autostart::is_enabled();
+                self.page = Page::Settings;
+            }
+            Message::CloseSettings => {
+                self.page = Page::Home;
+            }
+            Message::ToggleAutostart(on) => {
+                let result = if on {
+                    autostart::enable()
+                } else {
+                    autostart::disable()
+                };
+                if let Err(e) = result {
+                    eprintln!("color picker: autostart toggle failed: {e}");
+                }
+                self.autostart_enabled = autostart::is_enabled();
+            }
+            Message::ShowWindow => {
+                if let Some(id) = self.core.main_window_id() {
+                    return window::set_mode(id, window::Mode::Windowed);
+                }
+            }
+            Message::HideWindow => {
+                if let Some(id) = self.core.main_window_id() {
+                    return window::set_mode(id, window::Mode::Hidden);
+                }
+            }
         }
         Task::none()
     }
@@ -225,6 +326,23 @@ impl AppModel {
                 self.history.iter().map(PickedColor::hex).collect();
             let _ = self.config.write_entry(&ctx);
         }
+    }
+
+    fn settings_view(&self) -> Element<'_, Message> {
+        let autostart_row = widget::settings::item(
+            fl!("settings-autostart"),
+            widget::toggler(self.autostart_enabled).on_toggle(Message::ToggleAutostart),
+        );
+
+        let section = widget::settings::section()
+            .title(fl!("settings-startup"))
+            .add(autostart_row);
+
+        widget::Column::new()
+            .spacing(16)
+            .push(section)
+            .push(widget::text::caption(fl!("settings-autostart-hint")))
+            .into()
     }
 
     fn welcome_view(&self) -> Element<'_, Message> {

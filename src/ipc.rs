@@ -18,15 +18,23 @@ pub fn socket_path() -> PathBuf {
     runtime.join("cosmic-color-picker.sock")
 }
 
-/// Attempt to connect to the running app's socket and request a pick.
-/// Returns `true` on successful delivery (the daemon will run the overlay
-/// and store the result), `false` if no daemon is reachable.
+/// One-byte protocol over the IPC socket:
+/// - `b'p'` -> pick request (run the overlay, add result to history)
+/// - `b's'` -> show-window request (un-hide the main window)
 pub async fn try_send_pick() -> bool {
+    send_byte(b"p").await
+}
+
+pub async fn try_send_show() -> bool {
+    send_byte(b"s").await
+}
+
+async fn send_byte(byte: &[u8; 1]) -> bool {
     use tokio::io::AsyncWriteExt;
     let Ok(mut stream) = tokio::net::UnixStream::connect(socket_path()).await else {
         return false;
     };
-    stream.write_all(b"p").await.is_ok()
+    stream.write_all(byte).await.is_ok()
 }
 
 /// Best-effort cleanup of any socket file left behind by a prior crash.

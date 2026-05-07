@@ -10,6 +10,7 @@
 //!   the window (for autostart). M5 wires this into the autostart toggle.
 
 mod app;
+mod autostart;
 mod color;
 mod config;
 mod i18n;
@@ -100,6 +101,17 @@ fn run_pick_standalone() -> ExitCode {
 }
 
 fn run_app(background: bool) -> ExitCode {
+    // If a daemon is already running and the user invoked us without
+    // --background, hand off "show window" via IPC and exit. Cosmic will
+    // bring the existing instance to front instead of spawning a duplicate.
+    if !background {
+        if let Ok(rt) = tokio::runtime::Runtime::new()
+            && rt.block_on(ipc::try_send_show())
+        {
+            return ExitCode::SUCCESS;
+        }
+    }
+
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
     i18n::init(&requested_languages);
 
