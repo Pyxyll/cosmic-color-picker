@@ -1,14 +1,36 @@
 [package]
 name = "cosmic-color-picker"
-version = "0.1.0"
+version = "0.2.0-dev"
 edition = "2024"
 description = "Native Wayland color picker for COSMIC desktop"
 
 [dependencies]
-smithay-client-toolkit = "0.19"
-wayland-client = "0.31"
 image = { version = "0.25", default-features = false, features = ["png"] }
+smithay-client-toolkit = "0.19"
 tiny-skia = "0.11"
+wayland-client = "0.31"
+
+# Application stack (libcosmic + i18n) — pulls in iced, cosmic-config etc.
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8.7"
+tokio = { version = "1", features = ["full"] }
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+features = [
+    "about",
+    "single-instance",
+    "wgpu",
+    "xdg-portal",
+    "tokio",
+    "wayland",
+    "winit",
+    "dbus-config",
+]
+
+[dependencies.cosmic-config]
+git = "https://github.com/pop-os/libcosmic.git"
 
 [profile.release]
 lto = "thin"

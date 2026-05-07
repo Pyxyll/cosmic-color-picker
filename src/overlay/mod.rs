@@ -6,7 +6,17 @@
 //! are surface-relative; we add the output's logical position to derive the
 //! capture-space pixel for picking.
 
+mod capture;
+mod font;
+
 use std::io;
+
+/// Capture the screen, open the picker overlay, and return the picked hex
+/// (or `None` if the user cancelled).
+pub fn pick_color() -> io::Result<Option<String>> {
+    let img = capture::screenshot()?;
+    run(img)
+}
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -593,7 +603,7 @@ fn draw_label(
     hex: &str,
     swatch_color: [u8; 3],
 ) {
-    use crate::font;
+    // `font` is a sibling sub-module declared at the top of this file.
 
     const SCALE: u32 = 3;
     const PAD: i32 = 8;
