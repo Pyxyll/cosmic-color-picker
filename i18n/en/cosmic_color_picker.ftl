@@ -7,3 +7,5 @@ copy = Copy
 format-rgb = RGB
 format-hsl = HSL
 format-oklch = OKLCH
+history-title = Recent
+history-clear = Clear

@@ -93,10 +93,10 @@ fn run_app(background: bool) -> ExitCode {
     let settings = cosmic::app::Settings::default()
         .size_limits(
             cosmic::iced::Limits::NONE
-                .min_width(420.0)
+                .min_width(440.0)
                 .min_height(360.0),
         )
-        .size(cosmic::iced::Size::new(520.0, 540.0));
+        .size(cosmic::iced::Size::new(560.0, 680.0));
 
     let flags = app::Flags { background };
     match cosmic::app::run::<app::AppModel>(settings, flags) {
