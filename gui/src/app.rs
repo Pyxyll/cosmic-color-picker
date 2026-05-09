@@ -12,8 +12,6 @@ use crate::fl;
 use crate::ipc;
 use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
-use cosmic::iced::futures::channel::mpsc;
-use cosmic::iced::futures::SinkExt;
 use cosmic::iced::window;
 use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
@@ -62,10 +60,8 @@ pub enum Message {
     OpenSettings,
     CloseSettings,
     ToggleAutostart(bool),
-    /// IPC asked us to show the window (i.e. user re-launched while daemon
-    /// was running, or hit a "Show" hotkey).
-    ShowWindow,
-    /// Window close clicked: hide instead of exit so the daemon survives.
+    /// Hide button: minimise the window without exiting (the GUI lifecycle
+    /// is independent of the daemon now, so this is purely cosmetic).
     HideWindow,
 }
 
@@ -199,41 +195,12 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            self.core()
-                .watch_config::<Config>(Self::APP_ID)
-                .map(|update| Message::UpdateConfig(update.config)),
-            // Listen for pick requests from `cosmic-color-picker --pick`
-            // (i.e. the user's hotkey). Each accepted connection translates
-            // into a single PickPressed message handled by the normal
-            // overlay path, so the result lands in this app's history.
-            Subscription::run(|| {
-                cosmic::iced::stream::channel::<Message>(
-                    8,
-                    |mut tx: mpsc::Sender<Message>| async move {
-                        ipc::clean_stale_socket();
-                        let Ok(listener) =
-                            tokio::net::UnixListener::bind(ipc::socket_path())
-                        else {
-                            return;
-                        };
-                        loop {
-                            let Ok((mut stream, _)) = listener.accept().await else {
-                                continue;
-                            };
-                            use tokio::io::AsyncReadExt;
-                            let mut buf = [0u8; 1];
-                            let _ = stream.read(&mut buf).await;
-                            let msg = match buf[0] {
-                                b's' => Message::ShowWindow,
-                                _ => Message::PickPressed,
-                            };
-                            let _ = tx.send(msg).await;
-                        }
-                    },
-                )
-            }),
-        ])
+        // The GUI is purely a client of the daemon's IPC now: history changes
+        // arrive via watch_config, and Pick is initiated synchronously from
+        // the button. No more GUI-side socket listener.
+        self.core()
+            .watch_config::<Config>(Self::APP_ID)
+            .map(|update| Message::UpdateConfig(update.config))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -243,11 +210,14 @@ impl cosmic::Application for AppModel {
                     return Task::none();
                 }
                 self.picking = true;
-                // D0 transitional: spawn the daemon binary as a one-shot
-                // subprocess and read the picked hex off stdout. D2 swaps
-                // this for an IPC round-trip into a long-running daemon.
+                // Talk to the running daemon via the IPC socket. Falls back
+                // to spawning `cosmic-color-pickerd --quiet` directly if no
+                // daemon is reachable so the GUI is still usable in isolation.
                 return Task::perform(
                     async {
+                        if let Some(result) = ipc::request_pick().await {
+                            return result;
+                        }
                         tokio::task::spawn_blocking(|| {
                             let out = std::process::Command::new("cosmic-color-pickerd")
                                 .arg("--quiet")
@@ -295,8 +265,17 @@ impl cosmic::Application for AppModel {
             Message::UpdateConfig(c) => {
                 self.config = c;
                 // Re-parse so the in-memory list matches whatever just landed
-                // on disk (e.g. someone editing the config file directly).
+                // on disk (daemon write, manual edit, history clear).
                 self.history = parse_history(&self.config.history);
+                // Lift the most recent entry into the hero view so picks
+                // arriving via the daemon (e.g. user hits the hotkey while
+                // the GUI is open) populate the headline immediately rather
+                // than only landing in the history strip.
+                if let Some(top) = self.history.first().copied()
+                    && Some(top) != self.picked
+                {
+                    self.picked = Some(top);
+                }
             }
             Message::OpenSettings => {
                 self.autostart_enabled = autostart::is_enabled();
@@ -315,11 +294,6 @@ impl cosmic::Application for AppModel {
                     eprintln!("color picker: autostart toggle failed: {e}");
                 }
                 self.autostart_enabled = autostart::is_enabled();
-            }
-            Message::ShowWindow => {
-                if let Some(id) = self.core.main_window_id() {
-                    return window::set_mode(id, window::Mode::Windowed);
-                }
             }
             Message::HideWindow => {
                 if let Some(id) = self.core.main_window_id() {

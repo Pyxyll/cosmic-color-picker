@@ -921,6 +921,7 @@ dependencies = [
  "image",
  "smithay-client-toolkit 0.19.2",
  "tiny-skia",
+ "tokio",
  "wayland-client",
 ]
 

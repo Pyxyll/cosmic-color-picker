@@ -3,7 +3,7 @@
 //! All conversions are sRGB-aware. OKLCH uses the canonical OKLab matrix
 //! from Björn Ottosson's reference implementation.
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PickedColor {
     pub rgb: (u8, u8, u8),
 }

@@ -68,15 +68,18 @@ fn main() -> ExitCode {
     run_app(flags.background)
 }
 
-/// `--pick` path. Try the running daemon's IPC socket first; fall back to
-/// spawning `cosmic-color-pickerd` directly if no daemon is reachable.
-/// Either way the daemon owns clipboard + notification delivery.
+/// `--pick` path. Talk to the running daemon if reachable; otherwise spawn
+/// `cosmic-color-pickerd` directly so the hotkey still works without a
+/// daemon. Either way the daemon owns clipboard + notification delivery.
 fn run_pick() -> ExitCode {
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(_) => return spawn_daemon_oneshot(),
     };
-    if runtime.block_on(ipc::try_send_pick()) {
+    if runtime.block_on(ipc::daemon_reachable()) {
+        // Hand off via the socket. The daemon's `pick` handler responds with
+        // the hex (which we ignore here — clipboard + notify is its job).
+        let _ = runtime.block_on(ipc::request_pick());
         return ExitCode::SUCCESS;
     }
     spawn_daemon_oneshot()
@@ -94,14 +97,6 @@ fn spawn_daemon_oneshot() -> ExitCode {
 }
 
 fn run_app(background: bool) -> ExitCode {
-    if !background {
-        if let Ok(rt) = tokio::runtime::Runtime::new()
-            && rt.block_on(ipc::try_send_show())
-        {
-            return ExitCode::SUCCESS;
-        }
-    }
-
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
     i18n::init(&requested_languages);
 

@@ -1,48 +1,46 @@
-//! Lightweight IPC: a Unix socket the running app listens on so that
-//! `cosmic-color-picker --pick` (fired from the user's hotkey) lands inside
-//! the existing process instead of spawning a fresh one. The picked color
-//! flows into the running app's history.
+//! GUI-side IPC: a client that talks to the cosmic-color-pickerd daemon.
 //!
-//! Falls back transparently to the in-process overlay when no app is
-//! running, so the hotkey works either way.
+//! Protocol matches the daemon's `ipc.rs`: write `b'p'`, read back the
+//! picked hex (or empty line on cancel). The GUI is purely a client now;
+//! the daemon is the only process that listens on the socket.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-/// Where the running app's listening socket lives. Uses XDG_RUNTIME_DIR so
-/// it lives under /run/user/<uid> on most setups, which is wiped on logout
-/// and avoids stale sockets piling up in /tmp.
-pub fn socket_path() -> PathBuf {
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
+
+fn socket_path() -> PathBuf {
     let runtime = std::env::var("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/tmp"));
-    runtime.join("cosmic-color-picker.sock")
+    runtime.join("cosmic-color-pickerd.sock")
 }
 
-/// One-byte protocol over the IPC socket:
-/// - `b'p'` -> pick request (run the overlay, add result to history)
-/// - `b's'` -> show-window request (un-hide the main window)
-pub async fn try_send_pick() -> bool {
-    send_byte(b"p").await
-}
+/// Ask the running daemon to pick a colour. Returns:
+///   `Some(Some(hex))`  daemon picked a colour
+///   `Some(None)`       daemon was reachable but the user cancelled
+///   `None`             no daemon reachable; caller should fall back
+pub async fn request_pick() -> Option<Option<String>> {
+    let mut stream = UnixStream::connect(socket_path()).await.ok()?;
+    stream.write_all(b"p").await.ok()?;
 
-pub async fn try_send_show() -> bool {
-    send_byte(b"s").await
-}
+    // Generous read timeout: an idle user can sit on the picker for ages.
+    let mut buf = String::new();
+    let read = tokio::time::timeout(Duration::from_secs(600), stream.read_to_string(&mut buf))
+        .await
+        .ok()?;
+    read.ok()?;
 
-async fn send_byte(byte: &[u8; 1]) -> bool {
-    use tokio::io::AsyncWriteExt;
-    let Ok(mut stream) = tokio::net::UnixStream::connect(socket_path()).await else {
-        return false;
-    };
-    stream.write_all(byte).await.is_ok()
-}
-
-/// Best-effort cleanup of any socket file left behind by a prior crash.
-/// Called by the app before binding so its `bind` doesn't fail with EADDRINUSE.
-pub fn clean_stale_socket() {
-    let path = socket_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let trimmed = buf.trim();
+    if trimmed.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(trimmed.to_string()))
     }
-    let _ = std::fs::remove_file(&path);
+}
+
+/// Quick reachability check used by the `--pick` CLI fallback path.
+pub async fn daemon_reachable() -> bool {
+    UnixStream::connect(socket_path()).await.is_ok()
 }
