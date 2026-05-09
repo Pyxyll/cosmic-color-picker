@@ -10,7 +10,6 @@ use crate::color::PickedColor;
 use crate::config::Config;
 use crate::fl;
 use crate::ipc;
-use crate::overlay;
 use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::futures::channel::mpsc;
@@ -244,10 +243,26 @@ impl cosmic::Application for AppModel {
                     return Task::none();
                 }
                 self.picking = true;
+                // D0 transitional: spawn the daemon binary as a one-shot
+                // subprocess and read the picked hex off stdout. D2 swaps
+                // this for an IPC round-trip into a long-running daemon.
                 return Task::perform(
                     async {
                         tokio::task::spawn_blocking(|| {
-                            overlay::pick_color().ok().flatten()
+                            let out = std::process::Command::new("cosmic-color-pickerd")
+                                .arg("--quiet")
+                                .output()
+                                .ok()?;
+                            if !out.status.success() {
+                                return None;
+                            }
+                            let s = String::from_utf8(out.stdout).ok()?;
+                            let trimmed = s.trim();
+                            if trimmed.is_empty() {
+                                None
+                            } else {
+                                Some(trimmed.to_string())
+                            }
                         })
                         .await
                         .ok()

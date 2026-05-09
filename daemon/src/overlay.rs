@@ -6,10 +6,9 @@
 //! are surface-relative; we add the output's logical position to derive the
 //! capture-space pixel for picking.
 
-mod capture;
-mod font;
-
 use std::io;
+
+use crate::{capture, font};
 
 /// Capture the screen, open the picker overlay, and return the picked hex
 /// (or `None` if the user cancelled).

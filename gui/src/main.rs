@@ -1,13 +1,11 @@
-//! Color picker for COSMIC.
+//! cosmic-color-picker: the GUI app.
 //!
-//! - `cosmic-color-picker` (no args): launches the libcosmic application
-//!   window. Once D-Bus single-instance is wired up (M4), a second invocation
-//!   focuses the running window instead of starting a new one.
-//! - `cosmic-color-picker --pick`: triggers the picker overlay. Today this
-//!   captures and runs the overlay in-process; M4 will redirect it through
-//!   D-Bus to the running daemon so the result lands in the app's history.
-//! - `cosmic-color-picker --background`: launches the daemon without showing
-//!   the window (for autostart). M5 wires this into the autostart toggle.
+//! D0 architecture: the overlay code lives in the `cosmic-color-pickerd`
+//! daemon binary now. The GUI talks to the daemon when one is running
+//! (via the IPC socket); when no daemon is reachable it falls back to
+//! spawning `cosmic-color-pickerd` as a one-shot subprocess. D1 extends
+//! the daemon to be long-running with proper IPC; D2 wires the GUI's
+//! Pick button through that IPC instead of subprocess spawn.
 
 mod app;
 mod autostart;
@@ -15,10 +13,9 @@ mod color;
 mod config;
 mod i18n;
 mod ipc;
-mod overlay;
 
 use std::env;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 #[derive(Debug, Default)]
 struct CliFlags {
@@ -55,7 +52,7 @@ fn print_help() {
     println!();
     println!("  (no flags)    Open the application window.");
     println!("  --pick        Trigger the picker overlay and copy the result.");
-    println!("  --background  Start the daemon without showing the window.");
+    println!("  --background  Start the GUI hidden (used by autostart, deprecated in D2+).");
 }
 
 fn main() -> ExitCode {
@@ -71,39 +68,32 @@ fn main() -> ExitCode {
     run_app(flags.background)
 }
 
-/// `--pick` path. If the app is already running, hand off via the IPC
-/// socket so the result lands in the running history. Otherwise fall back
-/// to the standalone overlay flow (capture + copy + notify) so the hotkey
-/// keeps working when no daemon is up.
+/// `--pick` path. Try the running daemon's IPC socket first; fall back to
+/// spawning `cosmic-color-pickerd` directly if no daemon is reachable.
+/// Either way the daemon owns clipboard + notification delivery.
 fn run_pick() -> ExitCode {
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
-        Err(_) => return run_pick_standalone(),
+        Err(_) => return spawn_daemon_oneshot(),
     };
     if runtime.block_on(ipc::try_send_pick()) {
         return ExitCode::SUCCESS;
     }
-    run_pick_standalone()
+    spawn_daemon_oneshot()
 }
 
-fn run_pick_standalone() -> ExitCode {
-    match overlay::pick_color() {
-        Ok(Some(hex)) => {
-            deliver(&hex);
-            ExitCode::SUCCESS
-        }
-        Ok(None) => ExitCode::SUCCESS,
+fn spawn_daemon_oneshot() -> ExitCode {
+    match Command::new("cosmic-color-pickerd").status() {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) => ExitCode::from(s.code().unwrap_or(1).clamp(0, 255) as u8),
         Err(e) => {
-            eprintln!("color picker: overlay failed: {e}");
+            eprintln!("cosmic-color-picker: failed to launch cosmic-color-pickerd: {e}");
             ExitCode::from(1)
         }
     }
 }
 
 fn run_app(background: bool) -> ExitCode {
-    // If a daemon is already running and the user invoked us without
-    // --background, hand off "show window" via IPC and exit. Cosmic will
-    // bring the existing instance to front instead of spawning a duplicate.
     if !background {
         if let Ok(rt) = tokio::runtime::Runtime::new()
             && rt.block_on(ipc::try_send_show())
@@ -118,7 +108,7 @@ fn run_app(background: bool) -> ExitCode {
     let settings = cosmic::app::Settings::default()
         .size_limits(
             cosmic::iced::Limits::NONE
-                .min_width(440.0)
+                .min_width(420.0)
                 .min_height(360.0),
         )
         .size(cosmic::iced::Size::new(560.0, 680.0));
@@ -127,36 +117,8 @@ fn run_app(background: bool) -> ExitCode {
     match cosmic::app::run::<app::AppModel>(settings, flags) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("color picker: application failed: {e}");
+            eprintln!("cosmic-color-picker: application failed: {e}");
             ExitCode::from(1)
         }
     }
-}
-
-fn deliver(hex: &str) {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    println!("{hex}");
-
-    if let Ok(mut child) = Command::new("wl-copy").stdin(Stdio::piped()).spawn()
-        && let Some(mut stdin) = child.stdin.take()
-    {
-        let _ = stdin.write_all(hex.as_bytes());
-        drop(stdin);
-        let _ = child.wait();
-    }
-
-    let _ = Command::new("notify-send")
-        .args([
-            "--app-name",
-            "Color Picker",
-            "--icon",
-            "color-select-symbolic",
-            "--expire-time",
-            "3000",
-            hex,
-            "Copied to clipboard",
-        ])
-        .status();
 }

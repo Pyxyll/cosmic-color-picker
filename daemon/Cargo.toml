@@ -1,0 +1,15 @@
+[package]
+name = "cosmic-color-pickerd"
+version = "0.2.0-dev"
+edition = "2024"
+description = "Headless color-picker daemon for COSMIC"
+
+[[bin]]
+name = "cosmic-color-pickerd"
+path = "src/main.rs"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+smithay-client-toolkit = "0.19"
+tiny-skia = "0.11"
+wayland-client = "0.31"
