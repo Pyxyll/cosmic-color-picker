@@ -13,6 +13,7 @@ mod color;
 mod config;
 mod i18n;
 mod ipc;
+mod shortcut;
 
 use std::env;
 use std::process::{Command, ExitCode};
