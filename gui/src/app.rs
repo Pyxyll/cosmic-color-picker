@@ -48,9 +48,17 @@ pub struct AppModel {
     /// check mark for a brief window after a click. `None` once the
     /// feedback has been cleared.
     last_copied: Option<(String, Instant)>,
+    /// Set when a new color landed in the hero card; the swatch fades in
+    /// from `t = elapsed_since(start)`. `None` once the animation has run
+    /// to completion (the Tick handler clears it so the subscription stops).
+    hero_anim_start: Option<Instant>,
+    /// Set when a new chip was prepended to Recents; chip[0] slides + fades
+    /// in. Triggered only by PickResult, not SelectHistory.
+    chip_anim_start: Option<Instant>,
 }
 
 const COPY_FEEDBACK_MS: u64 = 1500;
+const PICK_ANIM_MS: u64 = 350;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -87,6 +95,9 @@ pub enum Message {
     /// Either a real keypress while capturing, or Esc to cancel.
     CaptureShortcut(Key, keyboard::Modifiers),
     OpenUrl(String),
+    /// Drives entry animations for hero swatch + new recents chip.
+    /// Self-clears the start fields once the elapsed time exceeds duration.
+    Tick,
 }
 
 impl cosmic::Application for AppModel {
@@ -141,6 +152,8 @@ impl cosmic::Application for AppModel {
             capturing_shortcut: false,
             shortcut_status: None,
             last_copied: None,
+            hero_anim_start: None,
+            chip_anim_start: None,
         };
 
         (app, Task::none())
@@ -194,17 +207,28 @@ impl cosmic::Application for AppModel {
             .watch_config::<Config>(Self::APP_ID)
             .map(|update| Message::UpdateConfig(update.config));
 
+        let mut subs = vec![config_sub];
+
+        // Tick at ~60fps only while a pick-entry animation is still running.
+        // Both timestamps self-clear in the Tick handler once expired, so
+        // this gate flips back to false and the timer subscription drops.
+        if self.hero_anim_start.is_some() || self.chip_anim_start.is_some() {
+            subs.push(
+                cosmic::iced::time::every(Duration::from_millis(16))
+                    .map(|_| Message::Tick),
+            );
+        }
+
         if self.capturing_shortcut {
-            let capture = event::listen_with(|e, _status, _window| match e {
+            subs.push(event::listen_with(|e, _status, _window| match e {
                 event::Event::Keyboard(keyboard::Event::KeyPressed {
                     key, modifiers, ..
                 }) => Some(Message::CaptureShortcut(key, modifiers)),
                 _ => None,
-            });
-            Subscription::batch([config_sub, capture])
-        } else {
-            config_sub
+            }));
         }
+
+        Subscription::batch(subs)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -249,6 +273,9 @@ impl cosmic::Application for AppModel {
                     self.history.insert(0, picked);
                     self.history.truncate(HISTORY_LIMIT);
                     self.save_history();
+                    let now = Instant::now();
+                    self.hero_anim_start = Some(now);
+                    self.chip_anim_start = Some(now);
                 }
             }
             Message::Copy(text) => {
@@ -367,6 +394,15 @@ impl cosmic::Application for AppModel {
             }
             Message::OpenUrl(url) => {
                 let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+            }
+            Message::Tick => {
+                let done = Duration::from_millis(PICK_ANIM_MS);
+                if matches!(self.hero_anim_start, Some(t) if t.elapsed() >= done) {
+                    self.hero_anim_start = None;
+                }
+                if matches!(self.chip_anim_start, Some(t) if t.elapsed() >= done) {
+                    self.chip_anim_start = None;
+                }
             }
         }
         Task::none()
@@ -534,7 +570,10 @@ impl AppModel {
     }
 
     fn hero_card(&self, p: &PickedColor) -> Element<'_, Message> {
-        let swatch = self.color_block(p.rgb, 80.0);
+        // Hero swatch: fade-in via alpha when a fresh pick just landed.
+        // No size animation here so the headline next to it doesn't reflow.
+        let alpha = ease_out_cubic(anim_progress(self.hero_anim_start));
+        let swatch = animated_color_block(p.rgb, 80.0, alpha);
 
         let icon_name = if self.is_recently_copied(&p.hex()) {
             "object-select-symbolic"
@@ -643,7 +682,17 @@ impl AppModel {
     }
 
     fn history_chip(&self, idx: usize, rgb: (u8, u8, u8)) -> Element<'_, Message> {
-        widget::button::custom(self.color_block(rgb, 36.0))
+        // The freshest entry slides + fades in: width grows from 0 to 36
+        // (which pushes the older chips rightward, reading like a real
+        // insertion) and the swatch alpha ramps in lockstep. Older chips
+        // render with the static `color_block`.
+        let inner = if idx == 0 && self.chip_anim_start.is_some() {
+            let p = ease_out_cubic(anim_progress(self.chip_anim_start));
+            animated_color_block(rgb, 36.0 * p, p)
+        } else {
+            self.color_block(rgb, 36.0)
+        };
+        widget::button::custom(inner)
             .padding(0)
             .class(cosmic::theme::style::Button::Standard)
             .on_press(Message::SelectHistory(idx))
@@ -679,6 +728,52 @@ fn format_toggle_row<'a>(label: &str, kind: Format, on: bool) -> Element<'a, Mes
         widget::toggler(on).on_toggle(move |v| Message::ToggleFormat(kind, v)),
     )
     .into()
+}
+
+/// 0..1 progress along an active animation. Returns 1.0 when `start` is
+/// `None` — i.e. the animation isn't running, so callers should render the
+/// final, fully-on state.
+fn anim_progress(start: Option<Instant>) -> f32 {
+    match start {
+        Some(t) => (t.elapsed().as_millis() as f32 / PICK_ANIM_MS as f32).clamp(0.0, 1.0),
+        None => 1.0,
+    }
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+/// Variant of `color_block` whose fill + border alpha are scaled by `alpha`.
+/// Used by the hero card and the freshest recents chip during entry
+/// animation; otherwise call sites stick with `color_block` (alpha = 1).
+fn animated_color_block<'a>(
+    rgb: (u8, u8, u8),
+    size: f32,
+    alpha: f32,
+) -> Element<'a, Message> {
+    let mut color = cosmic::iced::Color::from_rgb8(rgb.0, rgb.1, rgb.2);
+    color.a = alpha;
+    widget::container(widget::Space::new())
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .class(cosmic::theme::style::Container::custom(
+            move |theme: &cosmic::Theme| {
+                let cosmic = theme.cosmic();
+                let mut border_color: cosmic::iced::Color = cosmic.background.divider.into();
+                border_color.a *= alpha;
+                cosmic::iced::widget::container::Style {
+                    background: Some(color.into()),
+                    border: cosmic::iced::Border {
+                        radius: cosmic.corner_radii.radius_s.into(),
+                        width: 1.0,
+                        color: border_color,
+                    },
+                    ..Default::default()
+                }
+            },
+        ))
+        .into()
 }
 
 fn parse_history(raw: &[String]) -> Vec<PickedColor> {
