@@ -2,102 +2,123 @@
 
 A color picker for COSMIC, hacked together because nothing else worked.
 
-`hyprpicker` doesn't run because cosmic-comp doesn't expose `zwlr_screencopy_v1`. The portal's [`PickColor`](https://github.com/pop-os/xdg-desktop-portal-cosmic/blob/master/src/screenshot.rs) is a `// XXX implement` stub. So this is what I shipped while I waited.
+`hyprpicker` does not run because `cosmic-comp` does not expose `zwlr_screencopy_v1`, and `xdg-desktop-portal-cosmic`'s `PickColor` handler is currently a `// XXX implement` stub.
 
-Expect this to be **obsolete** the moment System76 fills in `xdg-desktop-portal-cosmic`'s color picker, which is the proper place for it. Until then, here we are.
-
-## What it does
-
-Trigger a hotkey, screen freezes, magnifier follows your cursor with a live hex readout, click to copy, Esc to cancel.
+v0.2 turns the original standalone picker into a proper PowerToys-style app: a background daemon, a GUI window for browsing history and configuring the shortcut, and a panel applet for one-click access. All three share the same history file.
 
 ![demo](demo.gif)
 
-## What it is
+> Will be obsolete the moment System76 implements `PickColor` properly. Treat this as a stopgap.
 
-About 600 lines of Rust. It:
+## What's in the box
 
-1. Shells out to `grim` for the screenshot
-2. Opens a `wlr-layer-shell` overlay surface per monitor, each rendering its slice of the capture
-3. Draws a magnifier circle at the cursor with an 8x zoom and a reticle, plus a hex pill below it
-4. On click, samples the captured image at the cursor and pipes the hex to `wl-copy` and `notify-send`
+| Binary | Job |
+|---|---|
+| `cosmic-color-pickerd` | Headless daemon. Owns the IPC socket, runs the overlay on demand, persists history. Auto-starts at login via the systemd user unit (or autostart entry on Flatpak). |
+| `cosmic-color-picker` | GUI. Hero swatch, format readouts (HEX, RGB, HSL, HSV), history strip, settings page with a click-to-record keyboard shortcut binder and an autostart toggle. |
+| `cosmic-applet-color-picker` | Panel applet. Pick button + recent chip strip + "Open Color Picker..." link. |
 
-There's a hand-rolled 5x7 pixel font for the hex digits because embedding a TTF for 17 glyphs felt silly.
-
-## Caveats
-
-- The magnifier doesn't appear until you move the mouse after triggering the hotkey. Cosmic doesn't fire `Pointer.Enter` for a fresh layer-shell surface, and seeding a default cursor position broke worse on multi-monitor.
-- Capture is a frozen screenshot, not live frames. Animations stop while you're picking. This is the same as basically every other color picker.
-- Tested on COSMIC Epoch alpha with a stacked dual-monitor setup. Other layouts probably work but were not validated.
-
-## Dependencies
-
-- `grim`
-- `wl-clipboard`
-- `libnotify`
-- A Wayland compositor with `wlr-layer-shell` (COSMIC, Hyprland, Sway, river)
+The hotkey, the applet, and the GUI's Pick button all funnel into the same daemon, so picks land in shared history regardless of where they came from.
 
 ## Install
 
-### Source (any distro)
+### Arch / CachyOS / Manjaro (AUR)
+
+`PKGBUILD` is shipped under `dist/aur/`. To build and install from source:
+
+```sh
+git clone https://github.com/Pyxyll/cosmic-color-picker.git
+cd cosmic-color-picker/dist/aur
+makepkg -si
+```
+
+Then enable the daemon:
+
+```sh
+systemctl --user enable --now cosmic-color-pickerd
+```
+
+Add the panel applet via **COSMIC Settings → Panel → Configure panel applets → Color Picker Applet**.
+
+The GUI shows up in the Cosmic launcher as "Color Picker."
+
+### Flatpak
+
+A manifest lives at `dist/flatpak/com.pyxyll.CosmicColorPicker.yml`. To build locally:
+
+```sh
+flatpak-builder --user --install build-dir dist/flatpak/com.pyxyll.CosmicColorPicker.yml
+```
+
+You'll need a `cargo-sources.json` generated from `Cargo.lock` first. Use [`flatpak-cargo-generator.py`](https://github.com/flatpak/flatpak-builder-tools/tree/master/cargo) for that.
+
+The Flathub submission is on the roadmap, not done yet.
+
+### Build from source (any distro)
+
+Requires `rust >= 1.95`, `just`, plus runtime tools: `grim`, `wl-clipboard`, `libnotify`.
 
 ```sh
 git clone https://github.com/Pyxyll/cosmic-color-picker.git
 cd cosmic-color-picker
-cargo build --release
-install -Dm0755 target/release/cosmic-color-picker ~/.local/bin/cosmic-color-picker
+sudo just install
+systemctl --user enable --now cosmic-color-pickerd
 ```
 
-Make sure `~/.local/bin` is on `$PATH`.
+`sudo just uninstall` removes everything.
 
-### Arch / CachyOS / Manjaro
+## Usage
+
+After install:
+
+1. Open **Color Picker** from your launcher.
+2. **Settings → Keyboard shortcut**: click the button, press your desired combo. Cosmic picks it up immediately. Esc cancels.
+3. Hit your hotkey anywhere → magnifier overlay → click → hex copies + notification fires + the value lands in the GUI's history.
+4. Or click the panel applet → big Pick button + recent chips + a link to the GUI.
+
+## Caveats
+
+- **Capture is a frozen screenshot via `grim`**, not live frames. Animations stop while you're picking. Same as basically every other color picker.
+- **Magnifier doesn't appear until you move the mouse** after triggering. COSMIC doesn't fire `Pointer.Enter` for a fresh layer-shell surface, and seeding a default cursor position made it look broken on multi-monitor setups.
+- **GUI X button kills the daemon if it was launched together.** libcosmic forces `iced::exit()` when the main window is closed (`core.exit_on_main_window_closed = true`, no public setter). The systemd user unit keeps the daemon up independently of the GUI's lifecycle, so this only matters if you started both manually.
+- **Applet doesn't auto-reopen after pick.** Layer-shell popups need a recent-input-event grab serial; opening from a delayed task fails silently. Clippy-land hit the same wall.
+
+## Architecture
+
+```
+[Hotkey]  ──spawn──>  cosmic-color-pickerd --pick ─┐
+                                                    │
+                                                    ├─IPC─> cosmic-color-pickerd (daemon)
+                                                    │         ├── runs the overlay
+[Applet]  ──spawn──>  cosmic-color-pickerd --pick ─┤         ├── persists hex to history
+                                                    │         └── responds with hex
+[GUI Pick] ──IPC───>  cosmic-color-pickerd (daemon)─┘
+                                                    
+            ~/.config/cosmic/com.pyxyll.CosmicColorPicker/v1/history (RON list)
+                  ▲                       ▲                    ▲
+                  │ writes                │ watch_config       │ watch_config
+              daemon                    GUI                  applet
+```
+
+The daemon owns history. GUI and applet are pure clients; both subscribe to the cosmic-config history file via `watch_config`, so picks land in their UIs without explicit messaging.
+
+## Development
 
 ```sh
-sudo pacman -S --needed rust grim wl-clipboard libnotify
+cargo build --release --workspace          # all three binaries
+cargo build --release -p cosmic-color-picker  # GUI only
+cargo build --release -p cosmic-color-pickerd # daemon only
+cargo build --release -p cosmic-applet-color-picker # applet only
 ```
 
-then the source steps above.
-
-### Fedora
-
-```sh
-sudo dnf install rust cargo grim wl-clipboard libnotify wayland-devel libxkbcommon-devel pkgconf-pkg-config
-```
-
-then the source steps above.
-
-### Pop!_OS / Debian / Ubuntu
-
-```sh
-sudo apt install rustc cargo grim wl-clipboard libnotify-bin libwayland-dev libxkbcommon-dev pkg-config
-```
-
-then the source steps above.
-
-## Bind a key
-
-It's a one-shot command, bind however your compositor expects.
-
-COSMIC: edit `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom`:
-
-```ron
-(
-    modifiers: [Super, Shift],
-    key: "c",
-): Spawn("/home/USER/.local/bin/cosmic-color-picker"),
-```
-
-Or use **COSMIC Settings, Keyboard, Custom Shortcuts**.
-
-Hyprland:
+Source structure:
 
 ```
-bind = SUPER SHIFT, C, exec, cosmic-color-picker
-```
-
-Sway:
-
-```
-bindsym $mod+Shift+c exec cosmic-color-picker
+cosmic-color-picker/
+├── daemon/    cosmic-color-pickerd  (no libcosmic; pure tokio + sctk)
+├── gui/       cosmic-color-picker   (libcosmic Application)
+├── applet/    cosmic-applet-color-picker  (libcosmic applet)
+└── dist/      systemd unit + AUR PKGBUILD + Flatpak manifest
 ```
 
 ## License

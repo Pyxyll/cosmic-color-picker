@@ -1,0 +1,84 @@
+app-id: com.pyxyll.CosmicColorPicker
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: cosmic-color-picker
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  build-args:
+    - --share=network
+  env:
+    CARGO_HOME: /run/build/cosmic-color-picker/cargo
+    RUSTFLAGS: ""
+
+# Permission grants — kept tight: wayland for layer-shell, host-config
+# files we own, the runtime dir for our daemon's IPC socket, the
+# notification portal for picker confirmations.
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  # Cosmic shortcut config (read+write so the GUI can rebind the hotkey)
+  - --filesystem=xdg-config/cosmic
+  # Autostart entry the GUI's toggle writes
+  - --filesystem=xdg-config/autostart
+  # Daemon's IPC socket and host PipeWire-based screen capture
+  - --filesystem=xdg-run
+  # Talk-name access for notifications and the screencopy portal
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.portal.Desktop
+
+modules:
+  # Bundle grim so the daemon's `grim` subprocess works without a host
+  # binary. Once the daemon ships native ext-image-copy-capture-v1
+  # support (D6+) this can be dropped.
+  - name: scdoc
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://git.sr.ht/~sircmpwn/scdoc/archive/1.11.3.tar.gz
+        sha256: 9c1909c1c51e348f13cd0fce25de4c0468e85c194da8c26b26d4ff7681415b85
+
+  - name: grim
+    buildsystem: meson
+    config-opts:
+      - -Dman-pages=disabled
+    sources:
+      - type: archive
+        url: https://git.sr.ht/~emersion/grim/archive/v1.4.2.tar.gz
+        sha256: 11c33dca9f9adcfe22a3b09b8eed5c2a6dc366d01551acab36f0f22dabb8ae44
+
+  # Bundle wl-clipboard so wl-copy works for clipboard delivery.
+  - name: wl-clipboard
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://github.com/bugaevc/wl-clipboard/archive/v2.2.1.tar.gz
+        sha256: 0c14fe07480b39da0ac4b5dd2bfa1031dc3a85471c6614dfc5c5bf0b73a5b2a3
+
+  # Our workspace.
+  - name: cosmic-color-picker
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      - cargo build --release --workspace --frozen
+      - install -Dm0755 target/release/cosmic-color-pickerd       /app/bin/cosmic-color-pickerd
+      - install -Dm0755 target/release/cosmic-color-picker        /app/bin/cosmic-color-picker
+      - install -Dm0755 target/release/cosmic-applet-color-picker /app/bin/cosmic-applet-color-picker
+      - install -Dm0644 gui/resources/com.pyxyll.CosmicColorPicker.desktop
+                        /app/share/applications/com.pyxyll.CosmicColorPicker.desktop
+      - install -Dm0644 applet/resources/com.pyxyll.CosmicColorPickerApplet.desktop
+                        /app/share/applications/com.pyxyll.CosmicColorPickerApplet.desktop
+    sources:
+      - type: dir
+        path: ../..
+      # cargo-sources.json is generated via `flatpak-cargo-generator.py`
+      # and committed alongside the manifest. Pulls in libcosmic + every
+      # transitive crate so the build runs offline (Flathub requirement).
+      - cargo-sources.json
