@@ -76,8 +76,6 @@ pub enum Format {
     Oklch,
 }
 
-const HISTORY_LIMIT: usize = 16;
-
 #[derive(Debug, Clone)]
 pub enum Message {
     PickPressed,
@@ -268,14 +266,15 @@ impl cosmic::Application for AppModel {
             }
             Message::PickResult(hex) => {
                 self.picking = false;
+                // The daemon already persisted this pick to the on-disk
+                // history (both for IPC and one-shot paths). Don't write
+                // again here — `watch_config` will deliver the change via
+                // `UpdateConfig`, which is also where chip-anim triggers.
+                // We only set `picked` + hero anim here for instant feedback
+                // ahead of the watch round-trip.
                 if let Some(picked) = hex.as_deref().and_then(PickedColor::from_hex) {
                     self.picked = Some(picked);
-                    self.history.insert(0, picked);
-                    self.history.truncate(HISTORY_LIMIT);
-                    self.save_history();
-                    let now = Instant::now();
-                    self.hero_anim_start = Some(now);
-                    self.chip_anim_start = Some(now);
+                    self.hero_anim_start = Some(Instant::now());
                 }
             }
             Message::Copy(text) => {
@@ -309,12 +308,22 @@ impl cosmic::Application for AppModel {
                 self.save_history();
             }
             Message::UpdateConfig(c) => {
+                let new_history = parse_history(&c.history);
+                // Detect a fresh entry at the head (a pick happened — either
+                // ours via PickResult, or a hotkey pick while the GUI was
+                // open). Compare against the current head before swapping in.
+                let head_changed = new_history.first() != self.history.first();
                 self.config = c;
-                self.history = parse_history(&self.config.history);
+                self.history = new_history;
+                let now = Instant::now();
                 if let Some(top) = self.history.first().copied()
                     && Some(top) != self.picked
                 {
                     self.picked = Some(top);
+                    self.hero_anim_start = Some(now);
+                }
+                if head_changed && self.history.first().is_some() {
+                    self.chip_anim_start = Some(now);
                 }
             }
             Message::ToggleFormat(format, on) => {
