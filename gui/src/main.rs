@@ -21,7 +21,6 @@ use std::process::{Command, ExitCode};
 #[derive(Debug, Default)]
 struct CliFlags {
     pick: bool,
-    background: bool,
 }
 
 fn parse_args() -> Result<CliFlags, ExitCode> {
@@ -29,7 +28,6 @@ fn parse_args() -> Result<CliFlags, ExitCode> {
     for arg in env::args().skip(1) {
         match arg.as_str() {
             "--pick" => flags.pick = true,
-            "--background" => flags.background = true,
             "-h" | "--help" => {
                 print_help();
                 return Err(ExitCode::SUCCESS);
@@ -49,11 +47,12 @@ fn parse_args() -> Result<CliFlags, ExitCode> {
 }
 
 fn print_help() {
-    println!("Usage: cosmic-color-picker [--pick | --background]");
+    println!("Usage: cosmic-color-picker [--pick]");
     println!();
-    println!("  (no flags)    Open the application window.");
-    println!("  --pick        Trigger the picker overlay and copy the result.");
-    println!("  --background  Start the GUI hidden (used by autostart, deprecated in D2+).");
+    println!("  (no flags)  Open the application window.");
+    println!("  --pick      Trigger the picker overlay and copy the result.");
+    println!();
+    println!("Bindings configured in-app under Settings > Keyboard shortcut.");
 }
 
 fn main() -> ExitCode {
@@ -66,7 +65,7 @@ fn main() -> ExitCode {
         return run_pick();
     }
 
-    run_app(flags.background)
+    run_app()
 }
 
 /// `--pick` path. Talk to the running daemon if reachable; otherwise spawn
@@ -97,7 +96,7 @@ fn spawn_daemon_oneshot() -> ExitCode {
     }
 }
 
-fn run_app(background: bool) -> ExitCode {
+fn run_app() -> ExitCode {
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
     i18n::init(&requested_languages);
 
@@ -109,8 +108,7 @@ fn run_app(background: bool) -> ExitCode {
         )
         .size(cosmic::iced::Size::new(560.0, 680.0));
 
-    let flags = app::Flags { background };
-    match cosmic::app::run::<app::AppModel>(settings, flags) {
+    match cosmic::app::run::<app::AppModel>(settings, ()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("cosmic-color-picker: application failed: {e}");

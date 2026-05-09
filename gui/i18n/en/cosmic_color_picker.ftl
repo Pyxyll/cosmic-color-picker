@@ -15,9 +15,12 @@ format-hex = HEX
 format-rgb = RGB
 format-hsl = HSL
 format-hsv = HSV
+format-oklch = OKLCH
 
 history-title = Recent
 history-clear = Clear
+
+settings-formats = Display formats
 
 settings-shortcut = Keyboard shortcut
 shortcut-label = Shortcut

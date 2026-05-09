@@ -17,22 +17,15 @@ use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::event;
 use cosmic::iced::keyboard::{self, Key, key::Named};
-use cosmic::iced::window;
 use cosmic::iced::{Length, Subscription};
+use std::time::{Duration, Instant};
 use cosmic::prelude::*;
 use cosmic::widget;
 use cosmic::widget::nav_bar;
 
-#[derive(Default)]
-pub struct Flags {
-    pub background: bool,
-}
-
 pub struct AppModel {
     core: Core,
     config: Config,
-    #[allow(dead_code)]
-    flags: Flags,
     /// Most recently picked color, displayed in the result view.
     picked: Option<PickedColor>,
     /// True while the overlay is running, used to debounce repeated clicks.
@@ -53,13 +46,28 @@ pub struct AppModel {
     shortcut_status: Option<Result<String, String>>,
     /// Cached About data so the widget reference stays stable across views.
     about: widget::about::About,
+    /// Most recently copied value + when. Used to flash the copy icon to a
+    /// check mark for a brief window after a click. `None` once the
+    /// feedback has been cleared.
+    last_copied: Option<(String, Instant)>,
 }
+
+const COPY_FEEDBACK_MS: u64 = 1500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
     Picker,
     Settings,
     About,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Hex,
+    Rgb,
+    Hsl,
+    Hsv,
+    Oklch,
 }
 
 const HISTORY_LIMIT: usize = 16;
@@ -69,21 +77,23 @@ pub enum Message {
     PickPressed,
     PickResult(Option<String>),
     Copy(String),
+    /// Fires ~1.5s after a Copy to revert the checkmark feedback.
+    ClearCopyFeedback,
     SelectHistory(usize),
     ClearHistory,
     UpdateConfig(Config),
     ToggleAutostart(bool),
+    ToggleFormat(Format, bool),
     /// Click on the shortcut button — start listening for the next combo.
     BeginCaptureShortcut,
     /// Either a real keypress while capturing, or Esc to cancel.
     CaptureShortcut(Key, keyboard::Modifiers),
     OpenUrl(String),
-    HideWindow,
 }
 
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
-    type Flags = Flags;
+    type Flags = ();
     type Message = Message;
     const APP_ID: &'static str = "com.pyxyll.CosmicColorPicker";
 
@@ -95,7 +105,7 @@ impl cosmic::Application for AppModel {
         &mut self.core
     }
 
-    fn init(core: Core, flags: Self::Flags) -> (Self, Task<Message>) {
+    fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Message>) {
         let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
             .map(|ctx| match Config::get_entry(&ctx) {
                 Ok(c) => c,
@@ -133,11 +143,9 @@ impl cosmic::Application for AppModel {
                 "https://github.com/Pyxyll/cosmic-color-picker",
             )]);
 
-        let want_hidden = flags.background;
         let app = AppModel {
             core,
             config,
-            flags,
             picked,
             picking: false,
             history,
@@ -147,14 +155,10 @@ impl cosmic::Application for AppModel {
             capturing_shortcut: false,
             shortcut_status: None,
             about,
+            last_copied: None,
         };
 
-        let task = if want_hidden {
-            Task::done(cosmic::Action::App(Message::HideWindow))
-        } else {
-            Task::none()
-        };
-        (app, task)
+        (app, Task::none())
     }
 
     fn nav_model(&self) -> Option<&nav_bar::Model> {
@@ -177,11 +181,11 @@ impl cosmic::Application for AppModel {
     }
 
     fn header_end(&self) -> Vec<Element<'_, Message>> {
-        vec![
-            widget::button::icon(widget::icon::from_name("window-minimize-symbolic"))
-                .on_press(Message::HideWindow)
-                .into(),
-        ]
+        // Window controls (close/min/max) are provided by the compositor —
+        // we don't add anything else here. Hide-from-the-header was a
+        // workaround from the single-binary era and is unneeded now that
+        // the daemon owns its own lifecycle.
+        Vec::new()
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -265,7 +269,25 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::Copy(text) => {
-                return cosmic::iced::clipboard::write(text);
+                self.last_copied = Some((text.clone(), Instant::now()));
+                let copy = cosmic::iced::clipboard::write::<cosmic::Action<Message>>(text);
+                let clear = Task::perform(
+                    async {
+                        tokio::time::sleep(Duration::from_millis(COPY_FEEDBACK_MS)).await
+                    },
+                    |_| cosmic::Action::App(Message::ClearCopyFeedback),
+                );
+                return copy.chain(clear);
+            }
+            Message::ClearCopyFeedback => {
+                // Only clear if the most-recent copy is now stale; ignore
+                // strays from earlier rapid clicks (each Copy schedules its
+                // own clear, but a fresh click moves the goalposts).
+                if let Some((_, t)) = self.last_copied
+                    && t.elapsed() >= Duration::from_millis(COPY_FEEDBACK_MS)
+                {
+                    self.last_copied = None;
+                }
             }
             Message::SelectHistory(i) => {
                 if let Some(p) = self.history.get(i).copied() {
@@ -283,6 +305,21 @@ impl cosmic::Application for AppModel {
                     && Some(top) != self.picked
                 {
                     self.picked = Some(top);
+                }
+            }
+            Message::ToggleFormat(format, on) => {
+                let app_id = <Self as cosmic::Application>::APP_ID;
+                if let Ok(ctx) = cosmic_config::Config::new(app_id, Config::VERSION) {
+                    let mut new_config = self.config.clone();
+                    match format {
+                        Format::Hex => new_config.format_hex = on,
+                        Format::Rgb => new_config.format_rgb = on,
+                        Format::Hsl => new_config.format_hsl = on,
+                        Format::Hsv => new_config.format_hsv = on,
+                        Format::Oklch => new_config.format_oklch = on,
+                    }
+                    let _ = new_config.write_entry(&ctx);
+                    self.config = new_config;
                 }
             }
             Message::ToggleAutostart(on) => {
@@ -348,11 +385,6 @@ impl cosmic::Application for AppModel {
             Message::OpenUrl(url) => {
                 let _ = std::process::Command::new("xdg-open").arg(url).spawn();
             }
-            Message::HideWindow => {
-                if let Some(id) = self.core.main_window_id() {
-                    return window::set_mode(id, window::Mode::Hidden);
-                }
-            }
         }
         Task::none()
     }
@@ -368,13 +400,13 @@ impl AppModel {
     }
 
     fn picker_page(&self) -> Element<'_, Message> {
-        let pick_label = if self.picked.is_some() {
-            fl!("pick-another")
-        } else {
-            fl!("pick-button")
-        };
-        let pick_button = widget::button::suggested(pick_label)
-            .on_press_maybe((!self.picking).then_some(Message::PickPressed));
+        // Icon-only Pick button — text label felt heavy, the color-select
+        // glyph reads at-a-glance and matches the panel applet's icon.
+        let pick_button = widget::button::icon(
+            widget::icon::from_name("color-select-symbolic"),
+        )
+        .large()
+        .on_press_maybe((!self.picking).then_some(Message::PickPressed));
 
         let header = widget::Row::new()
             .align_y(cosmic::iced::Alignment::Center)
@@ -429,6 +461,14 @@ impl AppModel {
             .title(fl!("settings-shortcut"))
             .add(shortcut_col);
 
+        let formats_section = widget::settings::section()
+            .title(fl!("settings-formats"))
+            .add(format_toggle_row("HEX", Format::Hex, self.config.format_hex))
+            .add(format_toggle_row("RGB", Format::Rgb, self.config.format_rgb))
+            .add(format_toggle_row("HSL", Format::Hsl, self.config.format_hsl))
+            .add(format_toggle_row("HSV", Format::Hsv, self.config.format_hsv))
+            .add(format_toggle_row("OKLCH", Format::Oklch, self.config.format_oklch));
+
         let autostart_section = widget::settings::section()
             .title(fl!("settings-startup"))
             .add(widget::settings::item(
@@ -440,6 +480,7 @@ impl AppModel {
         widget::Column::new()
             .spacing(16)
             .push(shortcut_section)
+            .push(formats_section)
             .push(autostart_section)
             .into()
     }
@@ -472,11 +513,14 @@ impl AppModel {
     fn hero_card(&self, p: &PickedColor) -> Element<'_, Message> {
         let swatch = self.color_block(p.rgb, 120.0);
 
-        let copy_hex = widget::button::icon(
-            widget::icon::from_name("edit-copy-symbolic"),
-        )
-        .extra_small()
-        .on_press(Message::Copy(p.hex()));
+        let icon_name = if self.is_recently_copied(&p.hex()) {
+            "object-select-symbolic"
+        } else {
+            "edit-copy-symbolic"
+        };
+        let copy_hex = widget::button::icon(widget::icon::from_name(icon_name))
+            .extra_small()
+            .on_press(Message::Copy(p.hex()));
 
         let title = widget::Row::new()
             .spacing(8)
@@ -503,14 +547,42 @@ impl AppModel {
     }
 
     fn formats_card(&self, p: &PickedColor) -> Element<'_, Message> {
-        // HEX, RGB, HSL, HSV — same defaults as PowerToys. OKLCH is still
-        // available on PickedColor for the format-config work in D6.
-        widget::settings::section()
-            .add(format_item(&fl!("format-hex"), p.hex()))
-            .add(format_item(&fl!("format-rgb"), p.rgb_str()))
-            .add(format_item(&fl!("format-hsl"), p.hsl_str()))
-            .add(format_item(&fl!("format-hsv"), p.hsv_str()))
-            .into()
+        let mut section = widget::settings::section();
+        if self.config.format_hex {
+            let v = p.hex();
+            let copied = self.is_recently_copied(&v);
+            section = section.add(format_item(&fl!("format-hex"), v, copied));
+        }
+        if self.config.format_rgb {
+            let v = p.rgb_str();
+            let copied = self.is_recently_copied(&v);
+            section = section.add(format_item(&fl!("format-rgb"), v, copied));
+        }
+        if self.config.format_hsl {
+            let v = p.hsl_str();
+            let copied = self.is_recently_copied(&v);
+            section = section.add(format_item(&fl!("format-hsl"), v, copied));
+        }
+        if self.config.format_hsv {
+            let v = p.hsv_str();
+            let copied = self.is_recently_copied(&v);
+            section = section.add(format_item(&fl!("format-hsv"), v, copied));
+        }
+        if self.config.format_oklch {
+            let v = p.oklch_str();
+            let copied = self.is_recently_copied(&v);
+            section = section.add(format_item(&fl!("format-oklch"), v, copied));
+        }
+        section.into()
+    }
+
+    fn is_recently_copied(&self, value: &str) -> bool {
+        match &self.last_copied {
+            Some((s, t)) => {
+                s == value && t.elapsed() < Duration::from_millis(COPY_FEEDBACK_MS)
+            }
+            None => false,
+        }
     }
 
     fn history_card(&self) -> Element<'_, Message> {
@@ -518,6 +590,18 @@ impl AppModel {
         for (i, c) in self.history.iter().enumerate() {
             strip = strip.push(self.history_chip(i, c.rgb));
         }
+        // Wrap in a horizontal scroller so a long history doesn't overflow
+        // the popup width. The scrollbar appears on demand.
+        // Bottom padding on the inner strip so the scrollbar sits below
+        // the chips instead of overlapping them. Path through iced because
+        // cosmic::widget only re-exports the scrollable constructor.
+        let strip_padded = widget::container(strip).padding([0, 0, 12, 0]);
+        let scrollable_strip = widget::scrollable(strip_padded).direction(
+            cosmic::iced::widget::scrollable::Direction::Horizontal(
+                cosmic::iced::widget::scrollable::Scrollbar::new(),
+            ),
+        );
+
         let header = widget::Row::new()
             .align_y(cosmic::iced::Alignment::Center)
             .push(widget::text::heading(fl!("history-title")).width(Length::Fill))
@@ -529,7 +613,7 @@ impl AppModel {
             widget::Column::new()
                 .spacing(12)
                 .push(header)
-                .push(strip),
+                .push(scrollable_strip),
         )
         .padding(20)
         .width(Length::Fill)
@@ -566,6 +650,14 @@ impl AppModel {
             ))
             .into()
     }
+}
+
+fn format_toggle_row<'a>(label: &str, kind: Format, on: bool) -> Element<'a, Message> {
+    widget::settings::item(
+        label.to_string(),
+        widget::toggler(on).on_toggle(move |v| Message::ToggleFormat(kind, v)),
+    )
+    .into()
 }
 
 fn parse_history(raw: &[String]) -> Vec<PickedColor> {
@@ -659,14 +751,21 @@ fn named_key_str(n: Named) -> Option<&'static str> {
     })
 }
 
-fn format_item<'a>(label: &str, value: String) -> Element<'a, Message> {
+/// A settings-list row: label on the left, monospace value, copy icon button.
+/// `copied=true` swaps the copy icon for a checkmark to confirm the click.
+fn format_item<'a>(label: &str, value: String, copied: bool) -> Element<'a, Message> {
     let value_for_copy = value.clone();
+    let icon_name = if copied {
+        "object-select-symbolic"
+    } else {
+        "edit-copy-symbolic"
+    };
     let trailing = widget::Row::new()
         .spacing(12)
         .align_y(cosmic::iced::Alignment::Center)
         .push(widget::text::monotext(value))
         .push(
-            widget::button::icon(widget::icon::from_name("edit-copy-symbolic"))
+            widget::button::icon(widget::icon::from_name(icon_name))
                 .extra_small()
                 .on_press(Message::Copy(value_for_copy)),
         );

@@ -51,9 +51,6 @@ impl PickedColor {
         )
     }
 
-    /// Reserved for the D6 format-config work — OKLCH is hidden by default
-    /// but the conversion stays compiled in so users can opt back in.
-    #[allow(dead_code)]
     pub fn oklch_str(&self) -> String {
         let (l, c, h) = rgb_to_oklch(self.rgb.0, self.rgb.1, self.rgb.2);
         // CSS Color 4 syntax: oklch(L C H) where L is 0-1 (or %), C is unbounded float, H in degrees.
@@ -110,7 +107,6 @@ fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
 }
 
 /// sRGB (0-255 each channel) → OKLCH (lightness 0-1, chroma ~0-0.4, hue 0-360°).
-#[allow(dead_code)]
 fn rgb_to_oklch(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     fn to_linear(c: f32) -> f32 {
         if c <= 0.04045 {
