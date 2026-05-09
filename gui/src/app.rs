@@ -44,8 +44,6 @@ pub struct AppModel {
     /// Feedback from the last shortcut save: `Ok(human)` on success,
     /// `Err(reason)` on parse / write failure, `None` while idle.
     shortcut_status: Option<Result<String, String>>,
-    /// Cached About data so the widget reference stays stable across views.
-    about: widget::about::About,
     /// Most recently copied value + when. Used to flash the copy icon to a
     /// check mark for a brief window after a click. `None` once the
     /// feedback has been cleared.
@@ -131,18 +129,6 @@ impl cosmic::Application for AppModel {
             .icon(widget::icon::from_name("help-about-symbolic"))
             .data::<Page>(Page::About);
 
-        let about = widget::about::About::default()
-            .name("Color Picker")
-            .icon(widget::icon::from_name("color-select-symbolic"))
-            .version(env!("CARGO_PKG_VERSION"))
-            .author("pyxyll")
-            .license("MIT")
-            .comments("Native Wayland color picker for COSMIC")
-            .links([(
-                "Source",
-                "https://github.com/Pyxyll/cosmic-color-picker",
-            )]);
-
         let app = AppModel {
             core,
             config,
@@ -154,7 +140,6 @@ impl cosmic::Application for AppModel {
             shortcut_current: shortcut::current_binding(),
             capturing_shortcut: false,
             shortcut_status: None,
-            about,
             last_copied: None,
         };
 
@@ -193,9 +178,7 @@ impl cosmic::Application for AppModel {
         let body = match page {
             Page::Picker => self.picker_page(),
             Page::Settings => self.settings_page(),
-            Page::About => widget::about(&self.about, |url| {
-                Message::OpenUrl(url.to_string())
-            }),
+            Page::About => self.about_page(),
         };
 
         widget::container(widget::scrollable(
@@ -400,28 +383,67 @@ impl AppModel {
     }
 
     fn picker_page(&self) -> Element<'_, Message> {
-        // Icon-only Pick button — text label felt heavy, the color-select
-        // glyph reads at-a-glance and matches the panel applet's icon.
-        let pick_button = widget::button::icon(
-            widget::icon::from_name("color-select-symbolic"),
-        )
-        .large()
-        .on_press_maybe((!self.picking).then_some(Message::PickPressed));
-
-        let header = widget::Row::new()
-            .align_y(cosmic::iced::Alignment::Center)
-            .push(widget::Space::new().width(Length::Fill))
-            .push(pick_button);
-
-        let body = match &self.picked {
+        // Pick button lives inside the hero card / welcome view now —
+        // the floating header-row above the first card looked lonely and
+        // pushed the cards too far down. The body owns its own action.
+        match &self.picked {
             None => self.welcome_view(),
             Some(p) => self.result_view(p),
+        }
+    }
+
+    fn pick_icon_button(&self) -> Element<'_, Message> {
+        widget::button::icon(widget::icon::from_name("color-select-symbolic"))
+            .large()
+            .on_press_maybe((!self.picking).then_some(Message::PickPressed))
+            .into()
+    }
+
+    fn about_page(&self) -> Element<'_, Message> {
+        // Embed the SVG bytes so the about page renders correctly even when
+        // the binary runs from `target/release` before `just install` has
+        // dropped the icon into the hicolor theme path.
+        let icon_handle = widget::icon::from_svg_bytes(
+            include_bytes!("../resources/com.pyxyll.CosmicColorPicker.svg").as_slice(),
+        );
+        let app_icon = widget::icon::icon(icon_handle).size(96);
+
+        let hero = widget::Column::new()
+            .spacing(6)
+            .align_x(cosmic::iced::Alignment::Center)
+            .push(app_icon)
+            .push(widget::text::title1(fl!("app-title")))
+            .push(widget::text::caption(format!(
+                "v{}",
+                env!("CARGO_PKG_VERSION")
+            )))
+            .push(widget::text::body(fl!("about-tagline")));
+
+        const REPO: &str = "https://github.com/Pyxyll/cosmic-color-picker";
+        let link = |label: String, url: String| -> Element<'_, Message> {
+            widget::button::link(label)
+                .on_press(Message::OpenUrl(url))
+                .into()
         };
 
+        let links = widget::Row::new()
+            .spacing(8)
+            .align_y(cosmic::iced::Alignment::Center)
+            .push(link(fl!("about-source"), REPO.to_string()))
+            .push(widget::text::body("·"))
+            .push(link(fl!("about-issues"), format!("{REPO}/issues")))
+            .push(widget::text::body("·"))
+            .push(link(
+                fl!("about-license"),
+                format!("{REPO}/blob/main/LICENSE"),
+            ));
+
         widget::Column::new()
-            .spacing(16)
-            .push(header)
-            .push(body)
+            .spacing(24)
+            .align_x(cosmic::iced::Alignment::Center)
+            .push(widget::container(hero).padding([24, 0, 0, 0]))
+            .push(links)
+            .push(widget::text::caption(fl!("about-copyright")))
             .into()
     }
 
@@ -488,11 +510,12 @@ impl AppModel {
     fn welcome_view(&self) -> Element<'_, Message> {
         widget::container(
             widget::Column::new()
-                .spacing(12)
+                .spacing(16)
                 .align_x(cosmic::iced::Alignment::Center)
                 .push(widget::icon::from_name("color-select-symbolic").size(64))
                 .push(widget::text::title3(fl!("welcome-title")))
-                .push(widget::text::body(fl!("welcome-body"))),
+                .push(widget::text::body(fl!("welcome-body")))
+                .push(self.pick_icon_button()),
         )
         .center_x(Length::Fill)
         .padding(48)
@@ -511,7 +534,7 @@ impl AppModel {
     }
 
     fn hero_card(&self, p: &PickedColor) -> Element<'_, Message> {
-        let swatch = self.color_block(p.rgb, 120.0);
+        let swatch = self.color_block(p.rgb, 80.0);
 
         let icon_name = if self.is_recently_copied(&p.hex()) {
             "object-select-symbolic"
@@ -522,25 +545,23 @@ impl AppModel {
             .extra_small()
             .on_press(Message::Copy(p.hex()));
 
-        let title = widget::Row::new()
+        let headline = widget::Row::new()
             .spacing(8)
             .align_y(cosmic::iced::Alignment::Center)
-            .push(widget::text::title1(p.hex()))
+            .push(widget::text::title2(p.hex()))
             .push(copy_hex);
 
-        let info = widget::Column::new()
-            .spacing(4)
-            .push(title)
-            .push(widget::text::caption(p.rgb_str()));
-
+        // [swatch | hex + copy | (filler) | pick]
         let row = widget::Row::new()
-            .spacing(20)
+            .spacing(16)
             .align_y(cosmic::iced::Alignment::Center)
             .push(swatch)
-            .push(info);
+            .push(headline)
+            .push(widget::Space::new().width(Length::Fill))
+            .push(self.pick_icon_button());
 
         widget::container(row)
-            .padding(20)
+            .padding(14)
             .width(Length::Fill)
             .class(cosmic::theme::style::Container::Card)
             .into()

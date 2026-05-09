@@ -31,3 +31,9 @@ shortcut-hint = Click the button and press your desired combination. Modifiers +
 settings-startup = Startup
 settings-autostart = Start on login
 settings-autostart-hint = When enabled, the daemon runs hidden in the background so your hotkey works immediately. The GUI window can be opened any time from the launcher.
+
+about-tagline = Native Wayland color picker for COSMIC.
+about-source = Source
+about-issues = Report an issue
+about-license = MIT License
+about-copyright = © 2026 pyxyll
