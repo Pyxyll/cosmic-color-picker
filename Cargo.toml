@@ -1,5 +1,5 @@
 [workspace]
-members = ["daemon", "gui"]
+members = ["applet", "daemon", "gui"]
 resolver = "3"
 
 [profile.release]

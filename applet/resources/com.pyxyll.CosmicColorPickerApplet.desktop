@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Color Picker Applet
+Comment=Quick access to the COSMIC color picker
+Type=Application
+Icon=color-select-symbolic
+Exec=cosmic-applet-color-picker
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC;Color;Picker
+NoDisplay=true
+X-CosmicApplet=true
+MimeType=
