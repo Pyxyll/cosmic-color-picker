@@ -11,9 +11,10 @@ pick-another = Pick another
 copy = Copy
 save = Save
 
+format-hex = HEX
 format-rgb = RGB
 format-hsl = HSL
-format-oklch = OKLCH
+format-hsv = HSV
 
 history-title = Recent
 history-clear = Clear

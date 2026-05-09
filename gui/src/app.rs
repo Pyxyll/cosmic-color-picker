@@ -503,10 +503,13 @@ impl AppModel {
     }
 
     fn formats_card(&self, p: &PickedColor) -> Element<'_, Message> {
+        // HEX, RGB, HSL, HSV — same defaults as PowerToys. OKLCH is still
+        // available on PickedColor for the format-config work in D6.
         widget::settings::section()
+            .add(format_item(&fl!("format-hex"), p.hex()))
             .add(format_item(&fl!("format-rgb"), p.rgb_str()))
             .add(format_item(&fl!("format-hsl"), p.hsl_str()))
-            .add(format_item(&fl!("format-oklch"), p.oklch_str()))
+            .add(format_item(&fl!("format-hsv"), p.hsv_str()))
             .into()
     }
 

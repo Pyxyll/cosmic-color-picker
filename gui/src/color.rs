@@ -41,6 +41,19 @@ impl PickedColor {
         )
     }
 
+    pub fn hsv_str(&self) -> String {
+        let (h, s, v) = rgb_to_hsv(self.rgb.0, self.rgb.1, self.rgb.2);
+        format!(
+            "hsv({}, {}%, {}%)",
+            h.round() as i32,
+            (s * 100.0).round() as i32,
+            (v * 100.0).round() as i32,
+        )
+    }
+
+    /// Reserved for the D6 format-config work — OKLCH is hidden by default
+    /// but the conversion stays compiled in so users can opt back in.
+    #[allow(dead_code)]
     pub fn oklch_str(&self) -> String {
         let (l, c, h) = rgb_to_oklch(self.rgb.0, self.rgb.1, self.rgb.2);
         // CSS Color 4 syntax: oklch(L C H) where L is 0-1 (or %), C is unbounded float, H in degrees.
@@ -74,7 +87,30 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     (h, s, l)
 }
 
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let v = max;
+    let s = if max == 0.0 { 0.0 } else { (max - min) / max };
+    if (max - min).abs() < f32::EPSILON {
+        return (0.0, 0.0, v);
+    }
+    let d = max - min;
+    let h = if max == r {
+        ((g - b) / d + if g < b { 6.0 } else { 0.0 }) * 60.0
+    } else if max == g {
+        ((b - r) / d + 2.0) * 60.0
+    } else {
+        ((r - g) / d + 4.0) * 60.0
+    };
+    (h, s, v)
+}
+
 /// sRGB (0-255 each channel) → OKLCH (lightness 0-1, chroma ~0-0.4, hue 0-360°).
+#[allow(dead_code)]
 fn rgb_to_oklch(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     fn to_linear(c: f32) -> f32 {
         if c <= 0.04045 {
