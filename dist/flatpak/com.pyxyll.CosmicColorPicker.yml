@@ -1,6 +1,6 @@
 app-id: com.pyxyll.CosmicColorPicker
 runtime: org.freedesktop.Platform
-runtime-version: '24.08'
+runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -26,39 +26,34 @@ finish-args:
   - --filesystem=xdg-config/cosmic
   # Autostart entry the GUI's toggle writes
   - --filesystem=xdg-config/autostart
-  # Daemon's IPC socket and host PipeWire-based screen capture
-  - --filesystem=xdg-run
-  # Talk-name access for notifications and the screencopy portal
+  # Notifications service (the Desktop portal is auto-granted, no talk-name needed)
   - --talk-name=org.freedesktop.Notifications
-  - --talk-name=org.freedesktop.portal.Desktop
 
 modules:
   # Bundle grim so the daemon's `grim` subprocess works without a host
-  # binary. Once the daemon ships native ext-image-copy-capture-v1
-  # support (D6+) this can be dropped.
-  - name: scdoc
-    buildsystem: meson
-    sources:
-      - type: archive
-        url: https://git.sr.ht/~sircmpwn/scdoc/archive/1.11.3.tar.gz
-        sha256: 9c1909c1c51e348f13cd0fce25de4c0468e85c194da8c26b26d4ff7681415b85
-
+  # binary. Future work: replace with native ext-image-copy-capture-v1
+  # in the daemon, then drop this module entirely.
+  # Man pages disabled so we don't need scdoc as a build dep.
   - name: grim
     buildsystem: meson
     config-opts:
       - -Dman-pages=disabled
     sources:
-      - type: archive
-        url: https://git.sr.ht/~emersion/grim/archive/v1.4.2.tar.gz
-        sha256: 11c33dca9f9adcfe22a3b09b8eed5c2a6dc366d01551acab36f0f22dabb8ae44
+      - type: git
+        url: https://git.sr.ht/~emersion/grim
+        tag: v1.4.1
 
   # Bundle wl-clipboard so wl-copy works for clipboard delivery.
+  # Disable fish completions — wl-clipboard's meson hardcodes the fish
+  # path to /usr/share/fish, which isn't writable inside /app.
   - name: wl-clipboard
     buildsystem: meson
+    config-opts:
+      - -Dfishcompletiondir=no
     sources:
-      - type: archive
-        url: https://github.com/bugaevc/wl-clipboard/archive/v2.2.1.tar.gz
-        sha256: 0c14fe07480b39da0ac4b5dd2bfa1031dc3a85471c6614dfc5c5bf0b73a5b2a3
+      - type: git
+        url: https://github.com/bugaevc/wl-clipboard.git
+        tag: v2.2.1
 
   # Our workspace.
   - name: cosmic-color-picker
@@ -77,9 +72,17 @@ modules:
                         /app/share/applications/com.pyxyll.CosmicColorPickerApplet.desktop
       - install -Dm0644 gui/resources/com.pyxyll.CosmicColorPicker.svg
                         /app/share/icons/hicolor/scalable/apps/com.pyxyll.CosmicColorPicker.svg
+      - install -Dm0644 gui/resources/com.pyxyll.CosmicColorPicker.metainfo.xml
+                        /app/share/metainfo/com.pyxyll.CosmicColorPicker.metainfo.xml
     sources:
+      # Local-build source. For the actual Flathub submission this is
+      # swapped for `type: git` pinned to a release tag — the dir form
+      # is what we use during local `flatpak-builder` testing.
       - type: dir
         path: ../..
+        skip:
+          - target
+          - .git
       # cargo-sources.json is generated via `flatpak-cargo-generator.py`
       # and committed alongside the manifest. Pulls in libcosmic + every
       # transitive crate so the build runs offline (Flathub requirement).

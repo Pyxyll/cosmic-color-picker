@@ -2,3 +2,7 @@
 *.swp
 *.swo
 .DS_Store
+
+# flatpak-builder local artifacts
+/.flatpak-builder
+/.flatpak-build
