@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-color-pickerd"
-version = "0.2.0-dev"
+version = "0.2.0"
 edition = "2024"
 description = "Headless color-picker daemon for COSMIC"
 
