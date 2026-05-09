@@ -21,6 +21,8 @@ install: build-release
                     {{app-dir}}/com.pyxyll.CosmicColorPicker.desktop
     install -Dm0644 applet/resources/com.pyxyll.CosmicColorPickerApplet.desktop \
                     {{app-dir}}/com.pyxyll.CosmicColorPickerApplet.desktop
+    install -Dm0644 gui/resources/com.pyxyll.CosmicColorPicker.svg \
+                    {{icon-dir}}/com.pyxyll.CosmicColorPicker.svg
     install -Dm0644 dist/systemd/cosmic-color-pickerd.service \
                     {{unit-dir}}/cosmic-color-pickerd.service
 
@@ -30,6 +32,7 @@ uninstall:
     rm -f {{bin-dir}}/cosmic-applet-color-picker
     rm -f {{app-dir}}/com.pyxyll.CosmicColorPicker.desktop
     rm -f {{app-dir}}/com.pyxyll.CosmicColorPickerApplet.desktop
+    rm -f {{icon-dir}}/com.pyxyll.CosmicColorPicker.svg
     rm -f {{unit-dir}}/cosmic-color-pickerd.service
 
 clean:

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background -->
+  <rect width="128" height="128" rx="28" fill="#1E293B"/>
+
+  <!-- Eyedropper, vertical, centered horizontally -->
+  <rect x="46" y="18" width="36" height="14" rx="5" fill="#F1F5F9"/>
+  <rect x="50" y="32" width="28" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="54" y="36" width="20" height="20" fill="#F1F5F9"/>
+  <rect x="54" y="56" width="20" height="16" fill="#EC4899"/>
+  <rect x="50" y="72" width="28" height="4" rx="1" fill="#94A3B8"/>
+  <path d="M54 76 L74 76 L67 96 L61 96 Z" fill="#F1F5F9"/>
+
+  <!-- Drop -->
+  <path d="M64 102
+           C 55 110, 55 119, 64 123
+           C 73 119, 73 110, 64 102 Z"
+        fill="#EC4899"/>
+</svg>

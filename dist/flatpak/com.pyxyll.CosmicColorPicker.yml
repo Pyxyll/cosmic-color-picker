@@ -75,6 +75,8 @@ modules:
                         /app/share/applications/com.pyxyll.CosmicColorPicker.desktop
       - install -Dm0644 applet/resources/com.pyxyll.CosmicColorPickerApplet.desktop
                         /app/share/applications/com.pyxyll.CosmicColorPickerApplet.desktop
+      - install -Dm0644 gui/resources/com.pyxyll.CosmicColorPicker.svg
+                        /app/share/icons/hicolor/scalable/apps/com.pyxyll.CosmicColorPicker.svg
     sources:
       - type: dir
         path: ../..

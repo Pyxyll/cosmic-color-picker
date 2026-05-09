@@ -47,6 +47,9 @@ package() {
     install -Dm0644 applet/resources/com.pyxyll.CosmicColorPickerApplet.desktop \
         "$pkgdir/usr/share/applications/com.pyxyll.CosmicColorPickerApplet.desktop"
 
+    install -Dm0644 gui/resources/com.pyxyll.CosmicColorPicker.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.pyxyll.CosmicColorPicker.svg"
+
     install -Dm0644 dist/systemd/cosmic-color-pickerd.service \
         "$pkgdir/usr/lib/systemd/user/cosmic-color-pickerd.service"
 
