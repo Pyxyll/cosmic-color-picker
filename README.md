@@ -14,7 +14,7 @@ v0.2 turns the original standalone picker into a proper PowerToys-style app: a b
 
 | Binary | Job |
 |---|---|
-| `cosmic-color-pickerd` | Headless daemon. Owns the IPC socket, runs the overlay on demand, persists history. Auto-starts at login via the systemd user unit (or autostart entry on Flatpak). |
+| `cosmic-color-pickerd` | Headless daemon. Owns the IPC socket, runs the overlay on demand, persists history. Auto-starts at login via the systemd user unit. |
 | `cosmic-color-picker` | GUI. Hero swatch, format readouts (HEX, RGB, HSL, HSV), history strip, settings page with a click-to-record keyboard shortcut binder and an autostart toggle. |
 | `cosmic-applet-color-picker` | Panel applet. Pick button + recent chip strip + "Open Color Picker..." link. |
 
@@ -41,18 +41,6 @@ systemctl --user enable --now cosmic-color-pickerd
 Add the panel applet via **COSMIC Settings → Panel → Configure panel applets → Color Picker Applet**.
 
 The GUI shows up in the Cosmic launcher as "Color Picker."
-
-### Flatpak
-
-A manifest lives at `dist/flatpak/com.pyxyll.CosmicColorPicker.yml`. To build locally:
-
-```sh
-flatpak-builder --user --install build-dir dist/flatpak/com.pyxyll.CosmicColorPicker.yml
-```
-
-You'll need a `cargo-sources.json` generated from `Cargo.lock` first. Use [`flatpak-cargo-generator.py`](https://github.com/flatpak/flatpak-builder-tools/tree/master/cargo) for that.
-
-The Flathub submission is on the roadmap, not done yet.
 
 ### Build from source (any distro)
 
@@ -118,7 +106,7 @@ cosmic-color-picker/
 ├── daemon/    cosmic-color-pickerd  (no libcosmic; pure tokio + sctk)
 ├── gui/       cosmic-color-picker   (libcosmic Application)
 ├── applet/    cosmic-applet-color-picker  (libcosmic applet)
-└── dist/      systemd unit + AUR PKGBUILD + Flatpak manifest
+└── dist/      systemd unit + AUR PKGBUILD
 ```
 
 ## License
