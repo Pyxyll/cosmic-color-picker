@@ -22,9 +22,37 @@ The hotkey, the applet, and the GUI's Pick button all funnel into the same daemo
 
 ## Install
 
-### Arch / CachyOS / Manjaro (AUR)
+Pick whichever matches your distro. After install, enable the daemon once:
 
-`PKGBUILD` is shipped under `dist/aur/`. To build and install from source:
+```sh
+systemctl --user enable --now cosmic-color-pickerd
+```
+
+Add the panel applet via **COSMIC Settings → Panel → Configure panel applets → Color Picker Applet**. The GUI shows up in the launcher as "Color Picker."
+
+### Pop!_OS / Ubuntu / Debian
+
+Download the `.deb` from the [latest release](https://github.com/Pyxyll/cosmic-color-picker/releases/latest):
+
+```sh
+sudo apt install ./cosmic-color-picker_*.deb
+```
+
+### Fedora / openSUSE
+
+Download the `.rpm` from the [latest release](https://github.com/Pyxyll/cosmic-color-picker/releases/latest):
+
+```sh
+sudo rpm -i cosmic-color-picker-*.rpm
+```
+
+### Arch / CachyOS / EndeavourOS / Manjaro
+
+```sh
+yay -S cosmic-color-picker          # or paru / your AUR helper of choice
+```
+
+Or build the in-tree PKGBUILD directly:
 
 ```sh
 git clone https://github.com/Pyxyll/cosmic-color-picker.git
@@ -32,17 +60,11 @@ cd cosmic-color-picker/dist/aur
 makepkg -si
 ```
 
-Then enable the daemon:
+### Anything else (static tarball)
 
-```sh
-systemctl --user enable --now cosmic-color-pickerd
-```
+Grab the `cosmic-color-picker-*-x86_64-linux.tar.gz` from the [latest release](https://github.com/Pyxyll/cosmic-color-picker/releases/latest), extract, and copy the contents into your prefix of choice (`/usr/local/`, `~/.local/`, etc.).
 
-Add the panel applet via **COSMIC Settings → Panel → Configure panel applets → Color Picker Applet**.
-
-The GUI shows up in the Cosmic launcher as "Color Picker."
-
-### Build from source (any distro)
+### Build from source
 
 Requires `rust >= 1.95`, `just`, plus runtime tools: `grim`, `wl-clipboard`, `libnotify`.
 

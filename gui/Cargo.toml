@@ -1,8 +1,11 @@
 [package]
 name = "cosmic-color-picker"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
-description = "COSMIC color picker GUI"
+description = "Native Wayland color picker for the COSMIC desktop"
+license = "MIT"
+homepage = "https://github.com/Pyxyll/cosmic-color-picker"
+repository = "https://github.com/Pyxyll/cosmic-color-picker"
 
 [[bin]]
 name = "cosmic-color-picker"
@@ -30,3 +33,50 @@ features = [
 
 [dependencies.cosmic-config]
 git = "https://github.com/pop-os/libcosmic.git"
+
+# ----- Distribution metadata -----
+# Single .deb / .rpm bundles all three workspace binaries (GUI, daemon, applet)
+# along with their .desktop entries, the icon, the metainfo, and the systemd
+# user unit. cargo-deb / cargo-generate-rpm read these sections from this
+# package's Cargo.toml; paths are relative to this file (gui/).
+
+[package.metadata.deb]
+name = "cosmic-color-picker"
+maintainer = "pyxyll <pyxyllv@gmail.com>"
+copyright = "2026, pyxyll <pyxyllv@gmail.com>"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+Native Wayland color picker for the COSMIC desktop. Hotkey-triggered \
+overlay with a pangocairo zoom loupe; clipboard delivery + notifications; \
+GUI window with HEX/RGB/HSL/HSV/OKLCH readouts and history; panel applet."""
+section = "graphics"
+priority = "optional"
+depends = "$auto, grim, wl-clipboard, libnotify-bin, libxkbcommon0, libwayland-client0"
+assets = [
+    ["../target/release/cosmic-color-picker",        "usr/bin/",                                       "755"],
+    ["../target/release/cosmic-color-pickerd",       "usr/bin/",                                       "755"],
+    ["../target/release/cosmic-applet-color-picker", "usr/bin/",                                       "755"],
+    ["resources/com.pyxyll.CosmicColorPicker.desktop",                "usr/share/applications/",       "644"],
+    ["../applet/resources/com.pyxyll.CosmicColorPickerApplet.desktop", "usr/share/applications/",      "644"],
+    ["resources/com.pyxyll.CosmicColorPicker.svg",                    "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["resources/com.pyxyll.CosmicColorPicker.metainfo.xml",           "usr/share/metainfo/",           "644"],
+    ["../dist/systemd/cosmic-color-pickerd.service",                  "usr/lib/systemd/user/",         "644"],
+    ["../README.md",                                                  "usr/share/doc/cosmic-color-picker/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "cosmic-color-picker"
+license = "MIT"
+summary = "Native Wayland color picker for the COSMIC desktop"
+requires = { grim = "*", "wl-clipboard" = "*", libnotify = "*", libxkbcommon = "*" }
+assets = [
+    { source = "../target/release/cosmic-color-picker",        dest = "/usr/bin/cosmic-color-picker",        mode = "755" },
+    { source = "../target/release/cosmic-color-pickerd",       dest = "/usr/bin/cosmic-color-pickerd",       mode = "755" },
+    { source = "../target/release/cosmic-applet-color-picker", dest = "/usr/bin/cosmic-applet-color-picker", mode = "755" },
+    { source = "resources/com.pyxyll.CosmicColorPicker.desktop",                 dest = "/usr/share/applications/com.pyxyll.CosmicColorPicker.desktop",        mode = "644" },
+    { source = "../applet/resources/com.pyxyll.CosmicColorPickerApplet.desktop", dest = "/usr/share/applications/com.pyxyll.CosmicColorPickerApplet.desktop", mode = "644" },
+    { source = "resources/com.pyxyll.CosmicColorPicker.svg",                     dest = "/usr/share/icons/hicolor/scalable/apps/com.pyxyll.CosmicColorPicker.svg", mode = "644" },
+    { source = "resources/com.pyxyll.CosmicColorPicker.metainfo.xml",            dest = "/usr/share/metainfo/com.pyxyll.CosmicColorPicker.metainfo.xml",        mode = "644" },
+    { source = "../dist/systemd/cosmic-color-pickerd.service",                   dest = "/usr/lib/systemd/user/cosmic-color-pickerd.service",                  mode = "644" },
+    { source = "../README.md",                                                   dest = "/usr/share/doc/cosmic-color-picker/README.md",                        mode = "644" },
+]

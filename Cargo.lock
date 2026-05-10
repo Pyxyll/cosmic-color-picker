@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-applet-color-picker"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cosmic-config",
  "i18n-embed",
@@ -925,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-color-picker"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cosmic-config",
  "i18n-embed",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-color-pickerd"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "image",
  "smithay-client-toolkit 0.19.2",
